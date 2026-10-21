@@ -13,7 +13,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
       <section className="login-card">
         <h1>Say It Better</h1>
         <h2>Administration</h2>
-        <p>Sign in to manage users, captions, and ratings.</p>
+        <p>Sign in to manage users, media, and ratings.</p>
         {reason && reasons[reason] && <p className="notice error" role="alert">{reasons[reason]}</p>}
         <LoginButton />
         <p className="login-help">Only accounts with superadmin access can continue.</p>

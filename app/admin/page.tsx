@@ -8,11 +8,11 @@ export default async function Dashboard() {
   const percentage = rated ? Math.round(data.positive / rated * 100) : null;
   return (
     <>
-      <PageHeader title="Dashboard" description="Users, captions, and ratings from Say It Better." action={<Link className="button primary" href="/admin/media/new">Create media</Link>} />
+      <PageHeader title="Dashboard" description="Users, media, and ratings from Say It Better." action={<Link className="button primary" href="/admin/media/new">Create media</Link>} />
       <div className="stats-grid">
         <Stat label="Total users" value={data.users.toLocaleString()} detail="User profiles" icon="users" />
         <Stat label="Media items" value={data.media.toLocaleString()} detail={`${data.published.toLocaleString()} shared with the community`} icon="media" />
-        <Stat label="Total ratings" value={data.ratings.toLocaleString()} detail="Across all captions" icon="ratings" />
+        <Stat label="Total ratings" value={data.ratings.toLocaleString()} detail="Across all media" icon="ratings" />
         <Stat label="Positive ratings" value={percentage === null ? "—" : `${percentage}%`} detail={rated ? `${data.positive.toLocaleString()} of ${rated.toLocaleString()} ratings` : "No ratings yet"} icon="ratings" />
       </div>
       <section className="panel rating-summary">
@@ -26,12 +26,12 @@ export default async function Dashboard() {
         </div>
       </section>
       <section className="panel">
-        <div className="panel-heading"><div><h2>Most-rated content</h2><p>Ranked by total ratings, then upvotes.</p></div><Link href="/admin/media" className="text-link">View media</Link></div>
-        {!data.top.length ? <Empty title="No rated content yet">Captions will appear here once they receive ratings.</Empty> : (
+        <div className="panel-heading"><div><h2>Most-rated media</h2><p>Ranked by total ratings, then upvotes.</p></div><Link href="/admin/media" className="text-link">View media</Link></div>
+        {!data.top.length ? <Empty title="No rated content yet">Media items will appear here once they receive ratings.</Empty> : (
           <div className="table-scroll"><table>
-            <thead><tr><th>Caption</th><th>Category</th><th>Ratings</th><th>Positive</th><th><span className="sr-only">Action</span></th></tr></thead>
+            <thead><tr><th>Media item</th><th>Category</th><th>Ratings</th><th>Positive</th><th><span className="sr-only">Action</span></th></tr></thead>
             <tbody>{data.top.map(item => <tr key={item.id}>
-              <td><strong className="truncate">{item.caption?.subject || item.caption?.caption_text || `Caption #${item.id}`}</strong><small>#{item.id} · {item.caption?.message_type ?? "Unavailable"}</small></td>
+              <td><strong className="truncate">{item.caption?.subject || item.caption?.caption_text || `Media item #${item.id}`}</strong><small>#{item.id} · {item.caption?.message_type ?? "Unavailable"}</small></td>
               <td><span className="pill capitalize">{item.caption?.category ?? "Unavailable"}</span></td>
               <td>{item.total.toLocaleString()}</td>
               <td>{Math.round(item.positive / item.total * 100)}%</td>

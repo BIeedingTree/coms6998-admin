@@ -2,6 +2,8 @@
 
 A separate Next.js, TypeScript, Tailwind CSS and Supabase application in `coms6998-admin`. It uses the same Supabase project as `coms6998e`, without modifying that repository, database schema, grants, or RLS policies.
 
+**Rated-media deletion requires manual database setup:** review [the inspection and installation steps](supabase/README.md) before claiming production deletion is complete. No SQL has been applied automatically.
+
 ## Start locally
 
 Use Node.js 22 (`nvm use` if available), then:
@@ -28,12 +30,12 @@ Manually set your own **existing** `profiles.is_superadmin` field to boolean `TR
 
 ## Features
 
-- `/admin`: exact profile/caption/rating totals, upvotes, downvotes, positive percentage, publication count, and the five most-rated captions. Rankings scan all rating pages rather than silently stopping at Supabase's response cap. Counts are current query results, not a transactional snapshot; concurrent activity can change them during a request.
+- `/admin`: exact profile/media/rating totals, upvotes, downvotes, positive percentage, publication count, and the five most-rated media items. Rankings scan all rating pages rather than silently stopping at Supabase's response cap. Counts are current query results, not a transactional snapshot; concurrent activity can change them during a request.
 - `/admin/users`: searchable, paginated profile table. Displays the verified existing fields: names, user ID, avatar availability and admin status. Profiles are read-only. Email and profile creation dates are not invented.
-- `/admin/media`: searchable caption library. AI generation creates a private record owned by the signed-in admin. Editing changes only caption text, subject, message type and category. Ownership, saved prompt and publication are preserved. Delete requires typing the caption ID.
-- `/admin/ratings`: paginated, read-only votes with upvote/downvote filters and associated profile/caption details.
+- `/admin/media`: searchable media library. AI generation creates a private record owned by the signed-in admin. Editing changes only media content, subject, message type and category. Ownership, saved prompt and publication are preserved. Delete requires typing the media ID and permanently removes its associated ratings in the same transaction after the reviewed SQL is installed.
+- `/admin/ratings`: paginated, read-only votes with upvote/downvote filters and associated profile/media details.
 
-New captions can be published through the original application. Updates and deletions affect the shared database and therefore appear in Assignment 5 too.
+New media can be published through the original application. Updates and deletions affect the shared database and therefore appear in Assignment 5 too.
 
 ## Database mapping and constraints
 
@@ -45,13 +47,13 @@ Inspected `coms6998e` on its clean `main` branch: Supabase browser/server client
 | `captions` | `id`, `caption_text`, `subject`, `message_type`, `category`, `user_id`, `created_at`, `is_public`, `published_at`; `prompt` only on creation | `user_id` references `auth.users.id` |
 | `caption_votes` | `id`, `caption_id`, `user_id`, `vote`, `created_at` | `caption_id` references `captions.id`; `user_id` references `auth.users.id` |
 
-The original code supplies email/message/other types and academic/career/clubs/housing/social/other categories. Email subjects must be nonempty, single-line, at most 200 characters; other message types store a null subject. Captions are limited to 2,000 characters. Generated prompts retain the original app's request-extraction markers.
+The original code supplies email/message/other types and academic/career/clubs/housing/social/other categories. Email subjects must be nonempty, single-line, at most 200 characters; other message types store a null subject. Media content is limited to 2,000 characters. Generated prompts retain the original app's request-extraction markers.
 
-Bigint caption/rating IDs are selected as text to avoid JavaScript integer rounding. User associations are resolved by ID, since the known foreign keys reference `auth.users`, not a direct PostgREST relationship to `profiles`.
+Bigint media/rating IDs are selected as text to avoid JavaScript integer rounding. User associations are resolved by ID, since the known foreign keys reference `auth.users`, not a direct PostgREST relationship to `profiles`.
 
 **Images:** the existing code uses the `avatars` storage bucket for profile photos. No caption image column or media upload bucket is established by the inspected code. Image uploads are therefore not added.
 
-**Deleting rated captions:** the existing foreign key has no declared `ON DELETE CASCADE`. Supabase can reject deletion when related ratings exist. The app reports that constraint and preserves both caption and ratings. It never silently deletes ratings or changes constraints.
+**Deleting rated media:** the existing foreign key has no declared `ON DELETE CASCADE`. The updated server action calls the proposed `admin_delete_media` RPC to delete the selected item and its votes atomically. The RPC rechecks the authenticated user’s database role and refuses unknown dependencies. Installation is manual; until it is installed, deletion returns a setup error. See [the exact SQL and required live-schema inspection](supabase/README.md). No foreign keys or RLS policies are changed.
 
 ## Server-side authorization
 
@@ -61,9 +63,9 @@ Bigint caption/rating IDs are selected as text to avoid JavaScript integer round
 4. The authenticated admin client is returned only after that check. Every data loader and mutation calls this guard; layout checks are additional protection. Generation rechecks the role after the AI response before saving.
 5. Logged-out requests redirect to `/login`; non-admin users go to `/access-denied`. Role/configuration failures have a distinct setup message. Errors never become invented zero totals or successful writes.
 
-The original application's grants/RLS permit only limited own-user access and do not allow general caption editing/deletion. The server-only service-role client intentionally bypasses RLS **after application authorization**, allowing administration without altering existing policies. This credential must belong to the same Supabase project. It is isolated by `server-only`, never passed to React client components, and never returned by an endpoint. Do not expose or log it.
+The original application's grants/RLS permit only limited own-user access and do not allow general media editing/deletion. The server-only service-role client intentionally bypasses RLS **after application authorization**, allowing administration without altering existing policies. This credential must belong to the same Supabase project. It is isolated by `server-only`, never passed to React client components, and never returned by an endpoint. Do not expose or log it.
 
-Only caption mutations are exported. There is no profile write, rating write, role-setting route, arbitrary table endpoint, public test route, or authentication bypass. Supabase session refresh runs in `proxy.ts`; access is enforced again at the data/mutation boundary. Next.js Server Actions retain their built-in same-origin protections. Admin responses use private/no-store caching.
+Only media mutations are exported. Associated ratings are removed only as part of authorized atomic media deletion. There is no profile write, standalone rating mutation, role-setting route, arbitrary table endpoint, public test route, or authentication bypass. Supabase session refresh runs in `proxy.ts`; access is enforced again at the data/mutation boundary. Next.js Server Actions retain their built-in same-origin protections. Admin responses use private/no-store caching.
 
 ## Verification
 
@@ -78,18 +80,20 @@ node scripts/smoke-http.mjs
 
 The production build uses Next.js's supported webpack compiler because this host's sandbox blocks the local process/port used by Turbopack's CSS compiler. This does not change the runtime or Vercel target.
 
-Automated tests execute the real authorization, data and mutation modules against isolated in-memory Supabase/Gemini mocks. They cover denied access, CRUD persistence round trips, immutable ownership/publication, role revocation during generation, invalid inputs, failed and zero-row writes, foreign-key deletion failures, pagination, cross-table associations, complete rankings beyond the API row cap, and OAuth callback decisions. These tests do **not** prove live Google login, live AI responses, or live Supabase CRUD.
+Automated tests execute the real authorization, data and mutation modules against isolated in-memory Supabase/Gemini mocks. They cover denied access, CRUD persistence round trips, immutable ownership/publication, role revocation during generation, invalid inputs, failed and zero-row writes, atomic rated-media deletion and rollback, pagination, cross-table associations, complete rankings beyond the API row cap, and OAuth callback decisions. These tests do **not** prove live Google login, live AI responses, or live Supabase CRUD.
 
 OAuth regression tests also execute the actual login button with the installed Supabase SDK. They verify the Auth endpoint, admin callback origin, public key initialization, and PKCE verifier persistence for both project-root and accidentally copied REST URLs. Server, proxy, and privileged clients are checked for consistent URL normalization.
+
+The SQL tests execute the proposed deletion function in isolated local PostgreSQL via PGlite, including permission checks, unrelated-row preservation and rollback. The UI terminology test checks static labels and messages while preserving database identifiers. These checks do not replace live schema inspection and manual installation.
 
 The HTTP smoke script is read-only and checks unauthenticated redirects for every admin page and login/callback responses. `TEST_ORIGIN` can override the default `http://127.0.0.1:3006`.
 
 ### Required live checks after configuration
 
 1. Confirm the new callback URL is allowlisted. Sign in through Google with your superadmin account.
-2. Compare users, captions and votes in the dashboard with the Supabase tables. Check searching, pagination and rating filters.
-3. Create a disposable private AI caption. Reload, reopen it, change its text/category, save, and reload again. Confirm the same record changed in Supabase.
-4. Delete that unrated test caption by typing its ID. Reload and confirm the record is absent. If testing a rated caption's deletion, expect the related-record error and verify its ratings remain.
+2. Compare users, media and votes in the dashboard with the Supabase tables. Check searching, pagination and rating filters.
+3. Create a disposable private AI media item. Reload, reopen it, change its text/category, save, and reload again. Confirm the same record changed in Supabase.
+4. After installing the reviewed deletion SQL, delete that unrated test item by typing its ID. Repeat with a disposable rated item: confirm all of its ratings are removed, while unrelated media, ratings and users remain.
 5. Sign in with a non-admin account and open every `/admin` route directly. Access must be denied. Test anonymous access in a separate browser session.
 6. Remove your test account's admin flag manually and submit an already-open edit form. The server must deny the mutation.
 

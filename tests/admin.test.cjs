@@ -18,7 +18,7 @@ for (const [label, options, destination] of [
   for (const method of ['generateMedia', 'updateMedia', 'deleteMedia']) test(`${label}: ${method} cannot write`, async () => {
     const env = setup(options);
     await assert.rejects(env.actions[method]({}, form({ ...valid, ...edit, confirmation: '1' })), error => error.message === 'REDIRECT:' + destination);
-    assert.equal(env.calls.writes.length, 0); assert.equal(env.calls.ai.length, 0);
+    assert.equal(env.calls.writes.length, 0); assert.equal(env.calls.ai.length, 0); assert.equal(env.calls.rpcs.length, 0);
     assert.ok(env.calls.queries.every(query => query.table === 'profiles'));
     if (!options.user && Object.hasOwn(options, 'user')) assert.equal(env.calls.factories, 0);
   });
@@ -28,7 +28,7 @@ for (const [label, options, destination] of [
     assert.ok(env.calls.queries.every(query => query.table === 'profiles'));
   });
 }
-test('CRUD round trip uses persisted rows, immutable ownership, and no profile/rating writes', async () => {
+test('CRUD round trip uses persisted rows, immutable ownership, and atomic deletion', async () => {
   const env = setup();
   const created = await env.actions.generateMedia({}, form({ ...valid, user_id: 'attacker', is_superadmin: 'true', is_public: 'true' }));
   assert.equal(created.id, '1'); assert.equal(env.tables.captions.length, 1);
@@ -37,8 +37,8 @@ test('CRUD round trip uses persisted rows, immutable ownership, and no profile/r
   const updated = await env.actions.updateMedia({}, form({ ...edit, user_id: 'attacker', prompt: 'overwrite', is_public: 'true', is_superadmin: 'true' }));
   assert.ok(updated.message); assert.equal((await env.data.getCaption('1')).caption_text, 'Revised caption');
   assert.equal(env.tables.captions[0].user_id, 'admin-id'); assert.equal(env.tables.captions[0].is_public, false); assert.match(env.tables.captions[0].prompt, /Situation:/);
-  const deleted = await env.actions.deleteMedia({}, form({ id: '1', confirmation: '1' }));
-  assert.ok(deleted.message); assert.equal((await env.data.getMedia({})).count, 0);
+  await assert.rejects(env.actions.deleteMedia({}, form({ id: '1', confirmation: '1' })), /REDIRECT:\/admin\/media\?deleted=1/);
+  assert.equal((await env.data.getMedia({})).count, 0);
   assert.ok(env.calls.writes.every(query => query.table === 'captions'));
 });
 test('updates preserve existing owner, prompt and publication', async () => {
@@ -56,11 +56,38 @@ for (const value of ['', '0', '-1', '1.0', '1 OR 1=1', '9223372036854775808']) t
   assert.ok((await env.actions.deleteMedia({}, form({ id: value, confirmation: value }))).error);
   assert.equal(env.calls.writes.length, 0);
 });
-test('deletion requires exact confirmation and FK failure preserves rated content', async () => {
-  const env = setup({ captions: [caption()], ratings: [{ id: '3', caption_id: '1', vote: 1, user_id: 'someone' }] });
+test('deletion requires exact confirmation and removes only selected media and its votes', async () => {
+  const env = setup({ captions: [caption(), { ...caption(), id: '2' }], ratings: [{ id: '3', caption_id: '1', vote: 1, user_id: 'someone' }, { id: '4', caption_id: '1', vote: -1, user_id: 'another' }, { id: '5', caption_id: '2', vote: 1, user_id: 'someone' }] });
   assert.ok((await env.actions.deleteMedia({}, form({ id: '1', confirmation: 'yes' }))).error); assert.equal(env.calls.writes.length, 0);
-  assert.match((await env.actions.deleteMedia({}, form({ id: '1', confirmation: '1' }))).error, /related records/);
+  assert.equal(env.calls.rpcs.length, 0);
+  await assert.rejects(env.actions.deleteMedia({}, form({ id: '1', confirmation: '1', user_id: 'forged' })), /REDIRECT:\/admin\/media\?deleted=1/);
   assert.equal(env.tables.captions.length, 1); assert.equal(env.tables.caption_votes.length, 1);
+  assert.equal(env.tables.captions[0].id, '2'); assert.equal(env.tables.caption_votes[0].caption_id, '2');
+  assert.equal(env.calls.rpcs[0].name, 'admin_delete_media');
+  assert.equal(JSON.stringify(env.calls.rpcs[0].args), JSON.stringify({ p_media_id: '1', p_confirmation: '1' }));
+  assert.ok(env.calls.refreshed.includes('/admin/media')); assert.ok(env.calls.refreshed.includes('/admin/ratings')); assert.ok(env.calls.refreshed.includes('/admin'));
+});
+for (const code of ['PGRST202', '42883', '42501', '23503', 'P0001']) test('failed deletion RPC preserves all rows and reports an error: ' + code, async () => {
+  const env = setup({ captions: [caption()], ratings: [{ id: '3', caption_id: '1' }], rpcError: { code } });
+  const result = await env.actions.deleteMedia({}, form({ id: '1', confirmation: '1' }));
+  assert.ok(result.error); assert.equal(result.message, undefined);
+  if (code === 'PGRST202' || code === '42883') assert.match(result.error, /not configured/);
+  assert.equal(env.tables.captions.length, 1); assert.equal(env.tables.caption_votes.length, 1); assert.equal(env.calls.refreshed.length, 0);
+});
+test('role revocation before RPC is denied independently by the database', async () => {
+  const env = setup({ captions: [caption()], revokeBeforeRPC: true });
+  assert.match((await env.actions.deleteMedia({}, form({ id: '1', confirmation: '1' }))).error, /Permission denied/);
+  assert.equal(env.tables.captions.length, 1);
+});
+test('ambiguous network failure never reports deletion success or a guaranteed rollback', async () => {
+  const env = setup({ captions: [caption()], rpcThrows: true });
+  assert.match((await env.actions.deleteMedia({}, form({ id: '1', confirmation: '1' }))).error, /Could not confirm deletion/);
+  assert.equal(env.calls.refreshed.length, 0);
+});
+test('SDK transport errors also report an unconfirmed result', async () => {
+  const env = setup({ captions: [caption()], rpcError: { message: 'Failed to fetch' } });
+  assert.match((await env.actions.deleteMedia({}, form({ id: '1', confirmation: '1' }))).error, /Could not confirm deletion/);
+  assert.equal(env.calls.refreshed.length, 0);
 });
 for (const options of [{ writeError: { code: '42501' } }, { zeroWrite: true }]) test('denied/zero-row writes never report success ' + JSON.stringify(options), async () => {
   const env = setup({ ...options, captions: [caption()] });

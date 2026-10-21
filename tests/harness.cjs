@@ -9,11 +9,25 @@ function setup(options = {}) {
   const user = Object.hasOwn(options, 'user') ? options.user : { id: 'admin-id', email: 'admin@columbia.edu', user_metadata: { is_superadmin: true } };
   const profile = Object.hasOwn(options, 'profile') ? options.profile : { id: 'admin-id', first_name: 'Admin', last_name: 'User', is_superadmin: true };
   const tables = { profiles: options.profiles ?? (profile ? [profile] : []), captions: options.captions ?? [], caption_votes: options.ratings ?? [] };
-  const calls = { factories: 0, queries: [], writes: [], ai: [], refreshed: [], identities: 0 };
+  const calls = { factories: 0, queries: [], writes: [], rpcs: [], ai: [], refreshed: [], identities: 0 };
   const session = { auth: {
     getUser: async () => { calls.identities++; return { data: { user }, error: options.authError ?? null }; },
     exchangeCodeForSession: async () => ({ error: options.exchangeError ?? null }),
     signOut: async () => ({ error: null }),
+  }, rpc: async (name, args) => {
+    calls.rpcs.push({ name, args });
+    if (name !== 'admin_delete_media') throw Error('Unexpected RPC');
+    if (options.rpcError || options.writeError) return { data: null, error: options.rpcError ?? options.writeError };
+    if (options.rpcThrows) throw Error('Network failure');
+    if (options.revokeBeforeRPC) profile.is_superadmin = false;
+    if (!user || profile?.is_superadmin !== true) return { data: null, error: { code: '42501' } };
+    if (options.zeroWrite) return { data: null, error: null };
+    const row = tables.captions.find(row => String(row.id) === args.p_media_id);
+    if (!row) return { data: null, error: null };
+    const votes = tables.caption_votes.filter(vote => String(vote.caption_id) === args.p_media_id);
+    votes.forEach(vote => tables.caption_votes.splice(tables.caption_votes.indexOf(vote), 1));
+    tables.captions.splice(tables.captions.indexOf(row), 1);
+    return { data: { id: String(row.id), deleted_ratings: String(votes.length) }, error: null };
   } };
   const db = { from(table) {
     const request = { table, operation: 'read', filters: [] }; calls.queries.push(request);
