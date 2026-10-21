@@ -17,7 +17,7 @@ npm run dev -- --port 3006
 
 | Variable | Purpose |
 | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Same Supabase project URL as Assignment 5 |
+| `NEXT_PUBLIC_SUPABASE_URL` | Same Supabase project root URL as Assignment 5, e.g. `https://YOUR-PROJECT.supabase.co`; omit `/rest/v1/` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same public authentication key as Assignment 5 |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only admin data access; never use a `NEXT_PUBLIC_` prefix |
 | `GEMINI_API_KEY` | Server-only AI generation, using the existing `gemini-3.5-flash-lite` model |
@@ -80,6 +80,8 @@ The production build uses Next.js's supported webpack compiler because this host
 
 Automated tests execute the real authorization, data and mutation modules against isolated in-memory Supabase/Gemini mocks. They cover denied access, CRUD persistence round trips, immutable ownership/publication, role revocation during generation, invalid inputs, failed and zero-row writes, foreign-key deletion failures, pagination, cross-table associations, complete rankings beyond the API row cap, and OAuth callback decisions. These tests do **not** prove live Google login, live AI responses, or live Supabase CRUD.
 
+OAuth regression tests also execute the actual login button with the installed Supabase SDK. They verify the Auth endpoint, admin callback origin, public key initialization, and PKCE verifier persistence for both project-root and accidentally copied REST URLs. Server, proxy, and privileged clients are checked for consistent URL normalization.
+
 The HTTP smoke script is read-only and checks unauthenticated redirects for every admin page and login/callback responses. `TEST_ORIGIN` can override the default `http://127.0.0.1:3006`.
 
 ### Required live checks after configuration
@@ -97,6 +99,22 @@ Do not use existing user content as disposable test data. No live database rows 
 
 Create a new Vercel project connected to **`coms6998-admin`**, using the Next.js preset and Node.js 22. Keep the Assignment 5 project separate. Set all four environment variables for the environments you will use; the service-role and Gemini keys must remain server-only. The build command is `npm run build`.
 
-Add the new deployment's exact `https://YOUR-ADMIN-DOMAIN/auth/callback` to Supabase's redirect allowlist alongside the existing app URL. Keep the existing Supabase Site URL/provider settings unless the project owner has a separate reason to change them; Google still uses the same Supabase provider callback. Redeploy after setting environment variables, then complete the live checks above. This implementation has not been pushed or deployed.
+Add the new deployment's exact `https://YOUR-ADMIN-DOMAIN/auth/callback` to Supabase's redirect allowlist alongside the existing app URL. Keep the existing Supabase Site URL/provider settings unless the project owner has a separate reason to change them; Google still uses the same Supabase provider callback. Redeploy after setting environment variables, then complete the live checks above.
+
+### Google login: "No API key found in request"
+
+The inspected deployment bundled a `NEXT_PUBLIC_SUPABASE_URL` ending in `/rest/v1/`. Its public key was present and matched the working application's key. Both apps already use `supabase.auth.signInWithOAuth` and return to their own `/auth/callback`; the admin callback exchanges the code and enforces the server-side superadmin check.
+
+The SDK appends `/auth/v1/authorize` to its configured project URL. The incorrect value therefore sent the browser to `/rest/v1/auth/v1/authorize`, where the REST gateway returned HTTP 401 with the missing-key message. A read-only check reproduced that response; the correct `/auth/v1/authorize` endpoint returned HTTP 302 to Google. No Google session was completed and no database data was changed by this check.
+
+The shared configuration helper now normalizes the mistakenly copied REST URL to the project root for every Supabase client and rejects other unexpected URL shapes. It does not add credentials to redirect URLs or weaken authorization.
+
+For deployment:
+
+1. In Vercel, correct `NEXT_PUBLIC_SUPABASE_URL` to the project's root URL, with no `/rest/v1/`. Keep the matching public key in `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+2. Ensure `SUPABASE_SERVICE_ROLE_KEY` is also configured as a **server-only** variable. It is required by the existing admin role/data guard after Google login; its absence is a separate configuration error, not the cause of this OAuth gateway error. Never prefix it with `NEXT_PUBLIC_`.
+3. Build and deploy the updated `main` with those environment variables. Next.js embeds public variables at build time; changing Vercel settings cannot fix an already-built deployment. Use the current production domain or the newly created deployment URL, rather than an old immutable deployment URL.
+4. Allowlist that origin's exact `/auth/callback` in Supabase Authentication → URL Configuration → Redirect URLs, keeping the original application's entries and provider settings. If signing in on a preview domain, allowlist its callback too and ensure the Preview environment has the required variables.
+5. Manually confirm your existing profile has boolean `is_superadmin = TRUE`, then complete the live login and authorization checks above.
 
 References: [Supabase SSR authentication](https://supabase.com/docs/guides/auth/server-side/creating-a-client), [Next.js authentication guidance](https://nextjs.org/docs/app/guides/authentication), [PostgREST column casting](https://docs.postgrest.org/en/stable/references/api/tables_views.html#casting-columns).

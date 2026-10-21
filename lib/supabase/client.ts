@@ -1,9 +1,8 @@
 "use client";
 import { createBrowserClient } from "@supabase/ssr";
+import { getSupabasePublicConfig } from "@/lib/supabase/config";
 
 export function createClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error("Supabase authentication is not configured.");
+  const { url, key } = getSupabasePublicConfig();
   return createBrowserClient(url, key);
 }

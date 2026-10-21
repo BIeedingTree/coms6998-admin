@@ -2,6 +2,7 @@ import "server-only";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSupabaseProjectUrl } from "@/lib/supabase/config";
 
 // This is the ONLY privileged-client factory. It is never exported. Identity
 // comes from Supabase Auth, and the role comes from the database on every call.
@@ -11,7 +12,7 @@ export async function getAdminAccess() {
   if (error || !user) return { status: "anonymous" as const };
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) return { status: "configuration" as const };
-  const db = createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, {
+  const db = createSupabaseClient(getSupabaseProjectUrl(), key, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
   // The old app's column grants exclude is_superadmin. This narrowly scoped

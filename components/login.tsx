@@ -7,7 +7,14 @@ export function LoginButton() {
   async function login() {
     setPending(true); setError("");
     try {
-      const { error } = await createClient().auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback`, queryParams: { prompt: "select_account" } } });
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: { prompt: "select_account" },
+        },
+      });
       if (error) throw error;
     } catch { setError("Google sign-in could not be started. Check the Supabase configuration and try again."); setPending(false); }
   }
