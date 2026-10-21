@@ -1,0 +1,9 @@
+import Link from "next/link";
+import { getMedia, type SearchParams } from "@/lib/data";
+import { dateLabel } from "@/lib/media";
+import { Icon } from "@/components/icons";
+import { Empty, PageHeader, Pagination, Search } from "@/components/ui";
+export default async function Media({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const data = await getMedia(await searchParams);
+  return <><PageHeader title="Media" description="Create, review, and manage your AI-written captions." action={<Link href="/admin/media/new" className="button primary"><Icon name="plus"/>Create media</Link>}/><section className="panel"><div className="panel-heading"><h2>Caption library <span className="count">{data.count}</span></h2><span className="pill">Text media</span></div><div className="toolbar"><Search q={data.q} placeholder="Search captions or email subjects"/></div>{!data.rows.length ? <Empty title={data.q ? "No matching captions" : "No captions yet"}>Create an AI caption or try a different search.</Empty> : <div className="table-scroll"><table><thead><tr><th>Caption</th><th>Category</th><th>Visibility</th><th>Created</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{data.rows.map(row => <tr key={row.id}><td><strong className="truncate">{row.subject || row.caption_text}</strong><small>#{row.id} · {row.message_type}</small></td><td><span className="pill capitalize">{row.category}</span></td><td><span className={`pill ${row.is_public ? "green" : ""}`}>{row.is_public ? "Community" : "Private"}</span></td><td className="nowrap">{dateLabel(row.created_at)}</td><td><Link className="text-link" href={`/admin/media/${row.id}`}>Edit <span aria-hidden="true">↗</span></Link></td></tr>)}</tbody></table></div>}<Pagination count={data.count} page={data.page} path="/admin/media" q={data.q}/></section><p className="data-note">Edits affect the shared database and the original application.</p></>;
+}
