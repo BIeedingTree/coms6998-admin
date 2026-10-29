@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 const origin = process.env.TEST_ORIGIN ?? 'http://127.0.0.1:3006';
-for (const path of ['/admin', '/admin/users', '/admin/media', '/admin/media/new', '/admin/media/1', '/admin/ratings', '/admin/images', '/admin/images?view=avatars', ...['prompt-chains','prompt-chain-steps','prompt-chain-mix','generation-requests','llm-responses','terms','generation-examples','llm-models','llm-providers','allowed-signup-domains','whitelisted-emails'].flatMap(s => [`/admin/${s}`, `/admin/${s}/new`, `/admin/${s}/00000000-0000-0000-0000-000000000001`])]) {
+for (const path of ['/admin', '/admin/users', '/admin/media', '/admin/media/new', '/admin/media/1', '/admin/ratings', '/admin/images', '/admin/images?view=avatars', '/admin/generation-requests/1', '/admin/llm-responses/1', ...['prompt-chains','prompt-chain-steps','prompt-chain-mix','generation-requests','llm-responses','terms','generation-examples','llm-models','llm-providers','allowed-signup-domains','whitelisted-emails'].flatMap(s => [`/admin/${s}`, `/admin/${s}/new`, `/admin/${s}/00000000-0000-0000-0000-000000000001`])]) {
   const response = await fetch(origin + path, { redirect: 'manual' });
   assert.equal(response.status, 307, path);
   assert.equal(new URL(response.headers.get('location'), origin).pathname, '/login', path);

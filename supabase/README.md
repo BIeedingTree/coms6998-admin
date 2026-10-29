@@ -3,7 +3,7 @@
 Run [migrations/202610290001_week7_admin.sql](migrations/202610290001_week7_admin.sql)
 for the current application. It includes the compatible definition of
 `admin_delete_media`. **Do not reinstall the older `admin-delete-media.sql` after
-the Week 7 migration:** the old function intentionally rejects the new foreign keys.
+the Week 7 migration:** the old function intentionally rejects the new example foreign key.
 The migration has not been applied by this agent. See [the Week 7 handoff](../docs/week7-status.md).
 
 The following instructions describe the earlier Week 6 setup for reference.

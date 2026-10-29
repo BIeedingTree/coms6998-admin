@@ -26,7 +26,7 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
   await pg.exec(sql); await pg.exec(sql);
   assert.deepEqual(await oldSchema(), schema); assert.deepEqual(await oldRows(), rows);
   assert.equal((await pg.query("select count(*)::int n from pg_policies where policyname='existing_profile_policy'")).rows[0].n, 1);
-  const tables = ['llm_providers','llm_models','prompt_chains','prompt_chain_steps','prompt_chain_mix','terms','generation_requests','llm_responses','ai_generation_examples','allowed_signup_domains','whitelisted_emails','admin_images'];
+  const tables = ['llm_providers','llm_models','prompt_chains','prompt_chain_steps','prompt_chain_mix','terms','ai_generation_examples','allowed_signup_domains','whitelisted_emails','admin_images'];
   await t.test('every new table denies browser roles and permits service-role CRUD', async () => {
     for (const table of tables) {
       assert.equal((await pg.query('select relrowsecurity from pg_class where oid=$1::regclass',[table])).rows[0].relrowsecurity,true);
@@ -39,7 +39,7 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
       assert.equal((await pg.query("select has_table_privilege('service_role',$1,'SELECT,INSERT,UPDATE,DELETE') ok",[table])).rows[0].ok,true);
     }
   });
-  let provider, model, chain, request, example;
+  let provider, model, chain, example;
   async function insert(table, values) {
     const keys = Object.keys(values); return (await pg.query(`insert into public.${table}(${keys.join(',')}) values (${keys.map((_,i)=>`$${i+1}`).join(',')}) returning *`,Object.values(values))).rows[0];
   }
@@ -53,8 +53,6 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
     await pg.query('update prompt_chain_mix set weight=2.5 where chain_id=$1',[chain.id]);
     assert.equal((await pg.query('select weight from prompt_chain_mix where chain_id=$1',[chain.id])).rows[0].weight,'2.5000');
     await assert.rejects(pg.query('update prompt_chain_mix set weight=-1 where chain_id=$1',[chain.id]),e=>e.code==='23514');
-    request = await insert('generation_requests',{input:'Isolated test request',user_id:admin,chain_id:chain.id,model_id:model.id,media_id:1,status:'succeeded'});
-    await insert('llm_responses',{request_id:request.id,model_id:model.id,content:'Isolated test response'});
     example = await insert('ai_generation_examples',{name:'Example',input:'Input',output:'Output',chain_id:chain.id,model_id:model.id,media_id:1});
     await assert.rejects(pg.query('delete from llm_providers where id=$1',[provider.id]),e=>['23503','23001'].includes(e.code));
     await assert.rejects(pg.query('delete from llm_models where id=$1',[model.id]),e=>['23503','23001'].includes(e.code));
@@ -95,15 +93,25 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
     try { return (await pg.query('select public.admin_delete_media($1,$2) result',[mediaId,String(mediaId)])).rows[0].result; }
     finally { await pg.exec('reset role'); }
   };
-  await t.test('updated media RPC denies non-admins; new FKs roll back votes; unreferenced media still deletes', async () => {
-    await assert.rejects(removeMedia(member,2),e=>e.code==='42501');
-    await assert.rejects(removeMedia('',2),e=>e.code==='42501');
-    await assert.rejects(removeMedia(admin,1),e=>['23503','23001'].includes(e.code));
+  await t.test('media deletion is atomic, preserves example text, and detaches only the selected media', async () => {
+    const unrelated = await insert('ai_generation_examples',{name:'Unrelated',input:'Keep input',output:'Keep output',media_id:2});
+    const originalExample = (await pg.query('select * from ai_generation_examples where id=$1',[example.id])).rows[0];
+    await assert.rejects(removeMedia(member,1),e=>e.code==='42501');
+    await assert.rejects(removeMedia('',1),e=>e.code==='42501');
+    // Exercise a real mid-delete failure after votes are removed, during FK detachment.
+    await pg.exec(`create function public.test_block_detach() returns trigger language plpgsql as $$begin raise exception 'Test-only failure'; end$$;
+      create trigger test_block_detach before update on ai_generation_examples for each row execute function public.test_block_detach()`);
+    await assert.rejects(removeMedia(admin,1),e=>e.code==='P0001');
     assert.equal((await pg.query('select count(*)::int n from caption_votes where caption_id=1')).rows[0].n,1);
-    assert.deepEqual(await removeMedia(admin,2),{id:'2',deleted_ratings:'1'});
-    await pg.query('update generation_requests set media_id=null where id=$1',[request.id]);
-    await pg.query('update ai_generation_examples set media_id=null where id=$1',[example.id]);
+    assert.deepEqual((await pg.query('select * from ai_generation_examples where id=$1',[example.id])).rows[0],originalExample);
+    await pg.exec('drop trigger test_block_detach on ai_generation_examples; drop function public.test_block_detach()');
     assert.deepEqual(await removeMedia(admin,1),{id:'1',deleted_ratings:'1'});
+    assert.equal((await pg.query('select count(*)::int n from captions where id=1')).rows[0].n,0);
+    assert.equal((await pg.query('select count(*)::int n from caption_votes where caption_id=1')).rows[0].n,0);
+    assert.deepEqual((await pg.query('select * from ai_generation_examples where id=$1',[example.id])).rows[0],{...originalExample,media_id:null});
+    assert.equal((await pg.query('select media_id from ai_generation_examples where id=$1',[unrelated.id])).rows[0].media_id,2);
+    assert.equal((await pg.query('select count(*)::int n from caption_votes where caption_id=2')).rows[0].n,1);
+    assert.deepEqual(await removeMedia(admin,2),{id:'2',deleted_ratings:'1'});
   });
   await t.test('chain mix provisioning works for service_role; unknown cascade dependencies remain blocked', async () => {
     await pg.exec('set role service_role');
@@ -114,6 +122,26 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
     await pg.exec('create table public.unreviewed_dependency(id bigint primary key, media_id bigint references public.captions(id) on delete cascade)');
     await assert.rejects(removeMedia(admin,99),e=>e.code==='P0001');
     await pg.exec('drop table public.unreviewed_dependency');
+  });
+
+  await t.test('no redundant log tables; exactly one new media FK with SET NULL', async () => {
+    assert.equal((await pg.query("select to_regclass('public.generation_requests') as requests, to_regclass('public.llm_responses') as responses")).rows[0].requests,null);
+    assert.equal((await pg.query("select to_regclass('public.llm_responses') as responses")).rows[0].responses,null);
+    const keys=(await pg.query("select conrelid::regclass::text as source,confdeltype from pg_constraint where contype='f' and confrelid='public.captions'::regclass order by source")).rows;
+    assert.deepEqual(keys,[{source:'ai_generation_examples',confdeltype:'n'},{source:'caption_votes',confdeltype:'a'}]);
+  });
+  await t.test('an already-applied incompatible draft fails without rewriting its FK', async () => {
+    await pg.exec('alter table ai_generation_examples drop constraint ai_generation_examples_media_id_fkey; alter table ai_generation_examples add constraint ai_generation_examples_media_id_fkey foreign key(media_id) references captions(id) on delete restrict');
+    await assert.rejects(pg.exec(sql),/Existing example\/media foreign key differs/);
+    await pg.exec('rollback');
+    assert.equal((await pg.query("select confdeltype from pg_constraint where conname='ai_generation_examples_media_id_fkey'")).rows[0].confdeltype,'r');
+  });
+
+  await t.test('pre-existing log tables and their data are not silently dropped', async () => {
+    await pg.exec("create table generation_requests(id bigint primary key, input text); insert into generation_requests values(1,'Keep this log')");
+    await assert.rejects(pg.exec(sql),/Earlier Week 7 log tables exist/);
+    await pg.exec('rollback');
+    assert.equal((await pg.query('select input from generation_requests where id=1')).rows[0].input,'Keep this log');
   });
 
 });

@@ -1,8 +1,23 @@
 -- Week 7 admin configuration and observability. Run manually in Supabase SQL Editor.
 -- Does not change existing tables, rows, foreign keys, RLS, auth, or storage policies.
 -- Browser roles have no access to these tables. Verified superadmins use the
--- existing server-only service-role client. The existing authenticated deletion RPC is updated for the new restrictive FKs.
+-- existing server-only service-role client. The existing authenticated deletion RPC is updated for the optional example link.
 begin;
+-- This revision is for the unapplied Week 7 draft. Never silently alter an
+-- existing differently-defined FK or discard any pre-existing log data.
+do $$ begin
+  if to_regclass('public.generation_requests') is not null
+     or to_regclass('public.llm_responses') is not null then
+    raise exception 'Earlier Week 7 log tables exist. Review schema before applying this revised migration.';
+  end if;
+  if exists (select 1 from pg_constraint c
+    where c.conrelid = to_regclass('public.ai_generation_examples')
+      and c.contype = 'f' and c.confrelid = 'public.captions'::regclass
+      and c.confdeltype <> 'n') then
+    raise exception 'Existing example/media foreign key differs. Review schema before applying this revised migration.';
+  end if;
+end $$;
+-- Provider/model catalog metadata only; nothing here executes or hosts AI models.
 create table if not exists public.llm_providers (
   id uuid primary key default gen_random_uuid(),
   name text not null unique check (length(btrim(name)) between 1 and 120),
@@ -57,24 +72,8 @@ create table if not exists public.terms (
   definition text not null check (length(btrim(definition)) between 1 and 10000),
   created_at timestamptz not null default now()
 );
-create table if not exists public.generation_requests (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete restrict,
-  chain_id uuid references public.prompt_chains(id) on delete restrict,
-  model_id uuid references public.llm_models(id) on delete restrict,
-  media_id bigint references public.captions(id) on delete restrict,
-  input text not null check (length(btrim(input)) between 1 and 50000),
-  status text not null default 'pending' check (status in ('pending','succeeded','failed')),
-  error text,
-  created_at timestamptz not null default now()
-);
-create table if not exists public.llm_responses (
-  id uuid primary key default gen_random_uuid(),
-  request_id uuid references public.generation_requests(id) on delete restrict,
-  model_id uuid references public.llm_models(id) on delete restrict,
-  content text not null check (length(btrim(content)) > 0),
-  created_at timestamptz not null default now()
-);
+-- Requests/responses are read directly from existing media prompt/subject/output.
+-- No duplicate logs, historical backfill, generation calls, or new history FKs.
 create table if not exists public.ai_generation_examples (
   id uuid primary key default gen_random_uuid(),
   name text not null check (length(btrim(name)) between 1 and 120),
@@ -82,7 +81,8 @@ create table if not exists public.ai_generation_examples (
   output text not null check (length(btrim(output)) between 1 and 50000),
   chain_id uuid references public.prompt_chains(id) on delete restrict,
   model_id uuid references public.llm_models(id) on delete restrict,
-  media_id bigint references public.captions(id) on delete restrict,
+  -- Preserve the independent example text when its optional source media is deleted.
+  media_id bigint references public.captions(id) on delete set null,
   created_at timestamptz not null default now()
 );
 create table if not exists public.allowed_signup_domains (
@@ -115,7 +115,7 @@ create table if not exists public.admin_images (
 -- Fail closed: no anon/authenticated policies. Existing storage policies untouched.
 do $$ declare t text; begin
   foreach t in array array['llm_providers','llm_models','prompt_chains','prompt_chain_steps',
-    'prompt_chain_mix','terms','generation_requests','llm_responses','ai_generation_examples',
+    'prompt_chain_mix','terms','ai_generation_examples',
     'allowed_signup_domains','whitelisted_emails','admin_images'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on table public.%I from public, anon, authenticated', t);
@@ -124,16 +124,10 @@ do $$ declare t text; begin
 end $$;
 create index if not exists week7_models_provider on public.llm_models(provider_id);
 create index if not exists week7_steps_model on public.prompt_chain_steps(model_id);
-create index if not exists week7_requests_user on public.generation_requests(user_id);
-create index if not exists week7_requests_chain on public.generation_requests(chain_id);
-create index if not exists week7_requests_model on public.generation_requests(model_id);
-create index if not exists week7_requests_media on public.generation_requests(media_id);
-create index if not exists week7_responses_request on public.llm_responses(request_id);
-create index if not exists week7_responses_model on public.llm_responses(model_id);
 create index if not exists week7_examples_chain on public.ai_generation_examples(chain_id);
 create index if not exists week7_examples_model on public.ai_generation_examples(model_id);
 create index if not exists week7_examples_media on public.ai_generation_examples(media_id);
--- Preserve Week 6 atomic deletion with the two known new RESTRICT dependencies.
+-- Preserve Week 6 atomic deletion and allow only the known example SET NULL link.
 create or replace function public.admin_delete_media(
   p_media_id bigint,
   p_confirmation text
@@ -183,14 +177,14 @@ begin
          where attrelid = 'public.captions'::regclass and attname = 'id' and not attisdropped)]
        and v_fk.confdeltype in ('a', 'r') and v_fk.convalidated then
       v_expected_fk := true;
-    elsif v_fk.conrelid in ('public.generation_requests'::regclass, 'public.ai_generation_examples'::regclass)
+    elsif v_fk.conrelid = 'public.ai_generation_examples'::regclass
        and v_fk.confrelid = 'public.captions'::regclass
        and v_fk.conkey = array[(select attnum from pg_catalog.pg_attribute
          where attrelid = v_fk.conrelid and attname = 'media_id' and not attisdropped)]
        and v_fk.confkey = array[(select attnum from pg_catalog.pg_attribute
          where attrelid = 'public.captions'::regclass and attname = 'id' and not attisdropped)]
-       and v_fk.confdeltype = 'r' and v_fk.convalidated then
-      -- The FK blocks deletion when referenced; the transaction rolls votes back.
+       and v_fk.confdeltype = 'n' and v_fk.convalidated then
+      -- Only detach the optional source link. Example input/output remain intact.
       null;
     else
       -- Do not silently cascade to unknown records, even if a future FK allows it.

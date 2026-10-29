@@ -34,6 +34,8 @@ function setup(options = {}) {
     let projection = '*'; let head = false; let from = 0; let to = Infinity; let ordering;
     const query = {
       select(fields, config = {}) { projection = fields; head = config.head; return query; },
+      not(key, op, value) { if (op !== 'is' || value !== null) throw Error('Unexpected not filter'); request.filters.push(row => row[key] != null); return query; },
+      neq(key, value) { request.filters.push(row => row[key] != null && String(row[key]) !== String(value)); return query; },
       eq(key, value) { request.filters.push(row => String(row[key]) === String(value)); return query; },
       gt(key, value) { request.filters.push(row => (/^[0-9]+$/.test(String(value)) ? BigInt(row[key]) > BigInt(value) : String(row[key]) > String(value))); return query; },
       in(key, values) { request.filters.push(row => values.map(String).includes(String(row[key]))); return query; },

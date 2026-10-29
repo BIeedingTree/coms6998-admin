@@ -134,12 +134,74 @@ test('image upload failure and deletion failure retain safe state', async () => 
 for (const [slug, table, row] of [
   ['prompt-chains','prompt_chains',{name:'Chain',description:'Config'}],
   ['prompt-chain-steps','prompt_chain_steps',{chain_id:other,name:'Step',step_order:1,prompt:'Prompt',model_id:null}],
-  ['generation-requests','generation_requests',{user_id:other,chain_id:null,model_id:null,media_id:'9223372036854775807',input:'Request',status:'succeeded',error:null}],
-  ['llm-responses','llm_responses',{request_id:other,model_id:null,content:'Response'}],
 ]) test(`${slug}: loads actual selected fields from its configured table (mocked transport)`, async () => {
   const h=context({tables:{[table]:[{id,...row}]}}); const data=h.load('lib/admin-data.ts');
   assert.equal((await data.listResource(slug,{})).count,1);
   const detail=await data.getResource(slug,id);
   for(const [key,value] of Object.entries(row)) assert.equal(detail.row[key],value);
   assert.equal(h.calls.writes.length,0);
+});
+for (const slug of ['generation-requests','llm-responses']) {
+  test(`${slug}: reads stored Gemini fields with exact bigint IDs, never calls AI or new log tables`, async () => {
+    const mediaId='9223372036854775807';
+    const row={id:mediaId,prompt:'Situation:\nAn actual saved prompt',caption_text:'Saved Gemini output',subject:'Saved subject',user_id:other,message_type:'email',category:'academic',created_at:'2026-10-29T12:00:00Z'};
+    const h=setup({captions:[row],profiles:[{id:'admin-id',is_superadmin:true},{id:other,first_name:'Existing',last_name:'User'}]});
+    const data=h.load('lib/admin-data.ts');
+    const list=await data.listResource(slug,{q:mediaId}); assert.equal(list.count,1); assert.equal(list.rows[0].id,mediaId);
+    const detail=await data.getResource(slug,mediaId); assert.equal(detail.row.prompt,row.prompt);
+    if(slug==='llm-responses') { assert.equal(detail.row.caption_text,row.caption_text); assert.equal(detail.row.subject,row.subject); }
+    assert.equal(detail.row.status,undefined); assert.equal(detail.row.model_id,undefined);
+    const options=await data.referenceOptions(detail.resource,detail.row); assert.equal(options.id[0].id,mediaId); assert.match(options.user_id[0].label,/Existing User/);
+    assert.equal(h.calls.ai.length,0); assert.equal(h.calls.writes.length,0);
+    assert.ok(h.calls.queries.every(q=>['captions','profiles'].includes(q.table)));
+    await assert.rejects(data.getResource(slug,id),/NOT_FOUND/); // UUID is not a media ID.
+    const actions=h.load('app/admin/[section]/actions.ts');
+    assert.ok((await actions.saveResource(slug,mediaId,{},form({caption_text:'Forged'}))).error);
+    assert.ok((await actions.deleteResource(slug,mediaId,{},form({confirmation:mediaId}))).error);
+    assert.equal(h.calls.writes.length,0);
+  });
+  for (const options of [{user:null},{profile:{id:'admin-id',is_superadmin:false}}]) test(`${slug}: stored media stays behind superadmin authorization ${JSON.stringify(options)}`,async()=>{
+    const h=setup(options); const data=h.load('lib/admin-data.ts');
+    await assert.rejects(data.listResource(slug,{}),/REDIRECT/); await assert.rejects(data.getResource(slug,'1'),/REDIRECT/);
+    assert.ok(h.calls.queries.every(q=>q.table==='profiles'));
+  });
+}
+test('requests exclude missing prompts; responses preserve nullable subject and reflect edits/deletion',async()=>{
+  const h=setup({captions:[{id:'1',prompt:null,caption_text:'Legacy content',subject:null},{id:'2',prompt:'',caption_text:'No prompt'},{id:'3',prompt:'Saved input',caption_text:'Initial output',subject:null}]});
+  const data=h.load('lib/admin-data.ts');
+  assert.equal((await data.listResource('generation-requests',{})).count,1);
+  assert.equal((await data.listResource('llm-responses',{})).count,3);
+  await assert.rejects(data.getResource('generation-requests','1'),/NOT_FOUND/);
+  await assert.rejects(data.getResource('generation-requests','2'),/NOT_FOUND/);
+  const response=await data.getResource('llm-responses','1'); assert.equal(response.row.subject,null); assert.equal(response.row.prompt,null);
+  assert.match(response.resource.notice,/edited/); assert.match(response.resource.notice,/not an immutable/);
+  h.tables.captions[2].caption_text='Edited output';
+  assert.equal((await data.getResource('llm-responses','3')).row.caption_text,'Edited output');
+  h.tables.captions.splice(2,1);
+  assert.equal((await data.listResource('generation-requests',{})).count,0);
+  await assert.rejects(data.getResource('llm-responses','3'),/NOT_FOUND/);
+  assert.equal(h.calls.ai.length,0);
+});
+test('stored input/output search and pagination use the original table',async()=>{
+  const h=setup({captions:Array.from({length:30},(_,i)=>({id:String(i+1),prompt:`Request ${i}`,caption_text:`Output ${i}`,subject:null}))});
+  const data=h.load('lib/admin-data.ts');
+  for(const slug of ['generation-requests','llm-responses']) assert.equal((await data.listResource(slug,{page:'2'})).rows.length,5);
+  assert.equal((await data.listResource('generation-requests',{q:'Request 29'})).count,1);
+  assert.equal((await data.listResource('llm-responses',{q:'Output 29'})).count,1);
+});
+test('observability list/detail pages render existing data and provenance without configuration tables',async()=>{
+  const {renderToStaticMarkup}=require('react-dom/server');
+  const mediaId='9223372036854775807';
+  const h=setup({captions:[{id:mediaId,prompt:'Stored request text',caption_text:'Actual stored output',subject:'Saved subject',user_id:other,created_at:'2026-10-29T12:00:00Z'}]});
+  const list=h.load('app/admin/[section]/page.tsx').default;
+  const detail=h.load('app/admin/[section]/[id]/page.tsx').default;
+  for(const section of ['generation-requests','llm-responses']) {
+    const html=renderToStaticMarkup(await list({params:Promise.resolve({section}),searchParams:Promise.resolve({})}));
+    assert.match(html,/Media saved/); assert.match(html,new RegExp(mediaId));
+    const full=renderToStaticMarkup(await detail({params:Promise.resolve({section,id:mediaId}),searchParams:Promise.resolve({saved:'1'})}));
+    assert.match(full,/Stored request text/); assert.match(full,/Media ID/); assert.doesNotMatch(full,/Record created in Supabase/);
+    if(section==='llm-responses') { assert.match(full,/Actual stored output/); assert.match(full,/Saved subject/); assert.match(full,/not an immutable response archive/); }
+    else assert.match(full,/request status/);
+  }
+  assert.equal(h.calls.ai.length,0); assert.equal(h.calls.writes.length,0);
 });

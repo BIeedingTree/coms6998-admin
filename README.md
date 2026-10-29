@@ -5,9 +5,11 @@
 All Week 7 sections are implemented. **Apply the new migration before using them.**
 See [setup, schema, testing, and rubric status](docs/week7-status.md). The migration
 is [supabase/migrations/202610290001_week7_admin.sql](supabase/migrations/202610290001_week7_admin.sql).
-It creates twelve admin-only tables (including standalone image metadata) and updates
-the existing atomic media-deletion RPC to recognize the two new restrictive media
-relationships. No existing rows, foreign keys, or RLS policies are changed.
+It creates ten admin-only configuration/content tables (including standalone image
+metadata) and updates the existing atomic media-deletion RPC to allow the optional
+example link to be cleared on media deletion. Requests and Responses read the
+existing stored media prompts and outputs directly; no duplicate log tables or
+replacement Gemini pipeline are introduced. No existing rows, foreign keys, or RLS policies are changed.
 
 
 A separate Next.js, TypeScript, Tailwind CSS and Supabase application in `coms6998-admin`. It uses the same Supabase project as `coms6998e`, without modifying that repository, database schema, grants, or RLS policies.
