@@ -40,7 +40,7 @@ export function dateLabel(value: string | null) {
 }
 export function databaseMessage(error: { code?: string } | null, fallback = "The database operation failed. Please try again.") {
   if (error?.code === "42501" || error?.code === "PGRST301") return "Permission denied by Supabase. Check the server credential and database permissions; no policies were changed.";
-  if (error?.code === "23503") return "Additional related records prevent deletion of this media item. Nothing was deleted; ask the project owner to review the database dependencies.";
+  if (error?.code === "23503" || error?.code === "23001") return "Additional related records prevent deletion of this media item. Nothing was deleted; ask the project owner to review the database dependencies.";
   if (error?.code === "42703" || error?.code === "42P01" || error?.code === "PGRST204") return "The database does not match the existing app’s schema. Verify its tables and columns; this app does not alter them.";
   return fallback;
 }

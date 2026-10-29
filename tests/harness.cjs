@@ -8,7 +8,7 @@ const form = fields => { const result = new FormData(); for (const [key, value] 
 function setup(options = {}) {
   const user = Object.hasOwn(options, 'user') ? options.user : { id: 'admin-id', email: 'admin@columbia.edu', user_metadata: { is_superadmin: true } };
   const profile = Object.hasOwn(options, 'profile') ? options.profile : { id: 'admin-id', first_name: 'Admin', last_name: 'User', is_superadmin: true };
-  const tables = { profiles: options.profiles ?? (profile ? [profile] : []), captions: options.captions ?? [], caption_votes: options.ratings ?? [] };
+  const tables = { profiles: options.profiles ?? (profile ? [profile] : []), captions: options.captions ?? [], caption_votes: options.ratings ?? [], ...options.tables };
   const calls = { factories: 0, queries: [], writes: [], rpcs: [], ai: [], refreshed: [], identities: 0 };
   const session = { auth: {
     getUser: async () => { calls.identities++; return { data: { user }, error: options.authError ?? null }; },
@@ -35,9 +35,9 @@ function setup(options = {}) {
     const query = {
       select(fields, config = {}) { projection = fields; head = config.head; return query; },
       eq(key, value) { request.filters.push(row => String(row[key]) === String(value)); return query; },
-      gt(key, value) { request.filters.push(row => BigInt(row[key]) > BigInt(value)); return query; },
+      gt(key, value) { request.filters.push(row => (/^[0-9]+$/.test(String(value)) ? BigInt(row[key]) > BigInt(value) : String(row[key]) > String(value))); return query; },
       in(key, values) { request.filters.push(row => values.map(String).includes(String(row[key]))); return query; },
-      or(filter) { request.or = filter; const parts = filter.split(',').map(part => part.split('.ilike.')); request.filters.push(row => parts.some(([key, value]) => String(row[key] ?? '').toLowerCase().includes(value.replaceAll('%', '').toLowerCase()))); return query; },
+      or(filter) { request.or = filter; const parts = filter.split(',').map(part => part.split(/\.(ilike|eq)\./)); request.filters.push(row => parts.some(([key, op, value]) => op === 'eq' ? String(row[key] ?? '') === value : String(row[key] ?? '').toLowerCase().includes(value.replaceAll('%', '').toLowerCase()))); return query; },
       order(key, config = {}) { ordering = [key, config.ascending !== false]; return query; },
       range(start, end) { from = start; to = end; return query; },
       limit(count) { to = count - 1; return query; },
@@ -67,7 +67,7 @@ function setup(options = {}) {
       const count = rows.length;
       if (ordering) { const [key, ascending] = ordering; rows.sort((a, b) => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0) * (ascending ? 1 : -1)); }
       rows = rows.slice(from, Math.min(to + 1, from + (options.apiCap ?? 1000)));
-      const projected = rows.map(row => Object.fromEntries(projection.split(',').map(field => { const [key, cast] = field.split('::'); return [key, cast === 'text' && row[key] != null ? String(row[key]) : row[key]]; })));
+      const projected = rows.map(row => projection === '*' ? { ...row } : Object.fromEntries(projection.split(',').map(field => { const [key, cast] = field.split('::'); return [key, cast === 'text' && row[key] != null ? String(row[key]) : row[key]]; })));
       return { data: head ? null : single ? projected[0] ?? null : projected, error: null, count };
     }
     return query;
@@ -76,7 +76,7 @@ function setup(options = {}) {
     'server-only': {},
     '@/lib/supabase/server': { createClient: async () => session },
     '@supabase/supabase-js': { createClient: () => { calls.factories++; return db; } },
-    'next/navigation': { redirect: path => { throw Error('REDIRECT:' + path); }, notFound: () => { throw Error('NOT_FOUND'); }, usePathname: () => '/admin' },
+    'next/navigation': { redirect: path => { throw Error('REDIRECT:' + path); }, notFound: () => { throw Error('NOT_FOUND'); }, usePathname: () => '/admin', useRouter: () => ({ refresh() {}, replace() {}, push() {} }) },
     'next/cache': { revalidatePath: path => calls.refreshed.push(path) },
     'next/server': { NextResponse: { redirect: url => ({ url: String(url), headers: new Headers() }) } },
     '@google/genai': { GoogleGenAI: class { models = { generateContent: async request => { calls.ai.push(request); if (options.aiError) throw Error('Private provider details'); if (options.revokeDuringAI) profile.is_superadmin = false; return { text: options.aiOutput ?? JSON.stringify({ subject: null, message: 'A test-only generated caption.' }) }; } }; } },
@@ -88,13 +88,13 @@ function setup(options = {}) {
     if (cache.has(file)) return cache.get(file);
     const exports = {}; cache.set(file, exports);
     const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-    vm.runInNewContext(compiled, { exports, URL, Headers, console, process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://test.invalid', SUPABASE_SERVICE_ROLE_KEY: options.noServiceKey ? undefined : 'test-only-server-key', GEMINI_API_KEY: options.noAIKey ? undefined : 'test-only-ai-key' } }, require(id) {
+    vm.runInNewContext(compiled, { exports, URL, Headers, File, Uint8Array, console, process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://test.invalid', SUPABASE_SERVICE_ROLE_KEY: options.noServiceKey ? undefined : 'test-only-server-key', GEMINI_API_KEY: options.noAIKey ? undefined : 'test-only-ai-key' } }, require(id) {
       if (Object.hasOwn(mocks, id)) return mocks[id];
       if (id.startsWith('@/')) return load(['.ts', '.tsx'].map(ext => path.join(root, id.slice(2) + ext)).find(fs.existsSync));
       return require(id);
     } }, { filename: file });
     return exports;
   }
-  return { calls, tables, profile, load, actions: load('app/admin/media/actions.ts'), data: load('lib/data.ts'), auth: load('lib/auth.ts') };
+  return { calls, tables, profile, db, load, actions: load('app/admin/media/actions.ts'), data: load('lib/data.ts'), auth: load('lib/auth.ts') };
 }
 module.exports = { setup, form };

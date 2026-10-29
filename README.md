@@ -1,5 +1,15 @@
 # Say It Better — Assignment 6 Admin
 
+## Week 7 implementation
+
+All Week 7 sections are implemented. **Apply the new migration before using them.**
+See [setup, schema, testing, and rubric status](docs/week7-status.md). The migration
+is [supabase/migrations/202610290001_week7_admin.sql](supabase/migrations/202610290001_week7_admin.sql).
+It creates twelve admin-only tables (including standalone image metadata) and updates
+the existing atomic media-deletion RPC to recognize the two new restrictive media
+relationships. No existing rows, foreign keys, or RLS policies are changed.
+
+
 A separate Next.js, TypeScript, Tailwind CSS and Supabase application in `coms6998-admin`. It uses the same Supabase project as `coms6998e`, without modifying that repository, database schema, grants, or RLS policies.
 
 **Rated-media deletion requires manual database setup:** review [the inspection and installation steps](supabase/README.md) before claiming production deletion is complete. No SQL has been applied automatically.
@@ -51,7 +61,7 @@ The original code supplies email/message/other types and academic/career/clubs/h
 
 Bigint media/rating IDs are selected as text to avoid JavaScript integer rounding. User associations are resolved by ID, since the known foreign keys reference `auth.users`, not a direct PostgREST relationship to `profiles`.
 
-**Images:** the existing code uses the `avatars` storage bucket for profile photos. No caption image column or media upload bucket is established by the inspected code. Image uploads are therefore not added.
+**Images:** Week 7 adds standalone image CRUD under `avatars/admin-images/`, tracked by `admin_images`. Existing profile avatar references are available in a read-only view. No profiles are editable; referenced images are protected from admin deletion. The existing bucket is public, so standalone uploads are public too.
 
 **Deleting rated media:** the existing foreign key has no declared `ON DELETE CASCADE`. The updated server action calls the proposed `admin_delete_media` RPC to delete the selected item and its votes atomically. The RPC rechecks the authenticated user’s database role and refuses unknown dependencies. Installation is manual; until it is installed, deletion returns a setup error. See [the exact SQL and required live-schema inspection](supabase/README.md). No foreign keys or RLS policies are changed.
 
@@ -65,7 +75,7 @@ Bigint media/rating IDs are selected as text to avoid JavaScript integer roundin
 
 The original application's grants/RLS permit only limited own-user access and do not allow general media editing/deletion. The server-only service-role client intentionally bypasses RLS **after application authorization**, allowing administration without altering existing policies. This credential must belong to the same Supabase project. It is isolated by `server-only`, never passed to React client components, and never returned by an endpoint. Do not expose or log it.
 
-Only media mutations are exported. Associated ratings are removed only as part of authorized atomic media deletion. There is no profile write, standalone rating mutation, role-setting route, arbitrary table endpoint, public test route, or authentication bypass. Supabase session refresh runs in `proxy.ts`; access is enforced again at the data/mutation boundary. Next.js Server Actions retain their built-in same-origin protections. Admin responses use private/no-store caching.
+Mutations are explicitly allowlisted for media, the six Week 7 CRUD resources, mix weights, and standalone images. Associated ratings are removed only as part of authorized atomic media deletion. There is no profile write, standalone rating mutation, role-setting route, arbitrary table endpoint, public test route, or authentication bypass. Supabase session refresh runs in `proxy.ts`; access is enforced again at the data/mutation boundary. Next.js Server Actions retain their built-in same-origin protections. Admin responses use private/no-store caching.
 
 ## Verification
 
