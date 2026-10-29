@@ -2,7 +2,8 @@
 
 ## Week 7 implementation
 
-All Week 7 sections are implemented. **Apply the new migration before using them.**
+All Week 7 sections are implemented. **The owner reports the revised migration
+installed successfully. Do not reapply it for this verification update.**
 See [setup, schema, testing, and rubric status](docs/week7-status.md). The migration
 is [supabase/migrations/202610290001_week7_admin.sql](supabase/migrations/202610290001_week7_admin.sql).
 It creates ten admin-only configuration/content tables (including standalone image
@@ -38,7 +39,7 @@ npm run dev -- --port 3006
 
 Open `http://localhost:3006`. Add `http://localhost:3006/auth/callback` to Supabase Authentication → URL Configuration → Redirect URLs. If using `127.0.0.1`, add that exact origin's callback too. Keep Assignment 5's settings in place.
 
-Manually set your own **existing** `profiles.is_superadmin` field to boolean `TRUE` in Supabase, as requested. This application cannot promote users. The original repository does not define that field in its checked-in SQL, so its existence in the live database still needs verification. If it does not exist, access remains closed; no migration is provided or applied.
+Sign in with an existing superadmin account. The supplied schema confirms `profiles.is_superadmin` is a non-null boolean defaulting to false. The server requires it to be exactly `true`; this application cannot promote users. Live account testing remains pending an authenticated session.
 
 ## Features
 

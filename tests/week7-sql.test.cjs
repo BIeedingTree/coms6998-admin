@@ -12,13 +12,15 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
     create schema auth; create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid$$;
     create table auth.users(id uuid primary key);
     create table public.profiles(id uuid primary key references auth.users(id), is_superadmin boolean not null default false);
-    create table public.captions(id bigint primary key, caption_text text);
+    create table public.captions(id bigint primary key, caption_text text, subject text,
+      prompt text, user_id uuid references auth.users(id), message_type text not null default 'message',
+      category text not null default 'other', created_at timestamptz default now());
     create table public.caption_votes(id bigint primary key, caption_id bigint references public.captions(id), user_id uuid references auth.users(id), vote smallint check(vote in (-1,1)), unique(caption_id,user_id));
     alter table public.profiles enable row level security; alter table public.captions enable row level security; alter table public.caption_votes enable row level security;
     create policy existing_profile_policy on public.profiles for select using (id = auth.uid());
     insert into auth.users values ('${admin}'),('${member}');
     insert into public.profiles values ('${admin}',true),('${member}',false);
-    insert into public.captions values (1,'Original'),(2,'Other');
+    insert into public.captions(id,caption_text) values (1,'Original'),(2,'Other');
     insert into public.caption_votes values (1,1,'${member}',1),(2,2,'${admin}',-1);`);
   const oldSchema = async () => (await pg.query(`select c.relname,c.relrowsecurity,(select jsonb_agg(pg_get_constraintdef(oid) order by conname) from pg_constraint where conrelid=c.oid) constraints from pg_class c where c.oid in ('profiles'::regclass,'captions'::regclass,'caption_votes'::regclass) order by c.relname`)).rows;
   const oldRows = async () => (await pg.query('select (select jsonb_agg(p) from profiles p) profiles, (select jsonb_agg(c) from captions c) media, (select jsonb_agg(v) from caption_votes v) votes')).rows;
@@ -38,6 +40,23 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
       }
       assert.equal((await pg.query("select has_table_privilege('service_role',$1,'SELECT,INSERT,UPDATE,DELETE') ok",[table])).rows[0].ok,true);
     }
+  });
+  await t.test('every Week 7 page projection, search field, and form field matches the migration or existing media schema', async () => {
+    const h = require('./harness.cjs').setup();
+    const {resources} = h.load('lib/admin-resources.ts');
+    const {fieldsFor} = h.load('lib/admin-data.ts');
+    for (const resource of resources) {
+      // Execute the real loader projection against PostgreSQL, including bigint casts.
+      await pg.query(`select ${fieldsFor(resource)} from public.${resource.table} limit 0`);
+      const columns = (await pg.query('select column_name from information_schema.columns where table_schema=$1 and table_name=$2',['public',resource.table])).rows.map(row => row.column_name);
+      for (const field of [...resource.search,...resource.fields.map(f=>f.key)]) assert.ok(columns.includes(field),`${resource.slug}: ${field}`);
+      for (const field of resource.fields.filter(f=>f.reference && !resource.source)) {
+        const target = field.reference === 'media' ? 'captions' : resources.find(r=>r.slug===field.reference).table;
+        const keys = (await pg.query(`select a.attname, c.confrelid::regclass::text target from pg_constraint c join pg_attribute a on a.attrelid=c.conrelid and a.attnum=any(c.conkey) where c.contype='f' and c.conrelid=$1::regclass`,[resource.table])).rows;
+        assert.ok(keys.some(k=>k.attname===field.key && k.target===target),`${resource.slug}: FK ${field.key} → ${target}`);
+      }
+    }
+    await pg.query(`select ${h.load('lib/admin-images.ts').IMAGE_FIELDS} from public.admin_images limit 0`);
   });
   let provider, model, chain, example;
   async function insert(table, values) {

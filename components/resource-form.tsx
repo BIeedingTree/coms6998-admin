@@ -7,7 +7,14 @@ import type { ActionState } from '@/lib/media';
 export function ResourceForm({ resource, row, options }: { resource: Resource; row?: AdminRow; options: Record<string, Option[]> }) {
   const router = useRouter();
   const [state, action, pending] = useActionState(saveResource.bind(null, resource.slug, row?.id ?? null), {} as ActionState);
-  useEffect(() => { if (state.id) { if (!row) router.replace(`/admin/${resource.slug}/${state.id}?saved=1`); router.refresh(); } }, [state, row, resource.slug, router]);
+  const creating = !row;
+  // Refreshed server props contain a new row object. Depending on that object
+  // would keep refreshing after every successful edit, including mix updates.
+  useEffect(() => {
+    if (!state.id) return;
+    if (creating) router.replace(`/admin/${resource.slug}/${state.id}?saved=1`);
+    else router.refresh();
+  }, [state, creating, resource.slug, router]);
   return <form action={action} className="panel form-panel" aria-busy={pending}>
     <fieldset disabled={pending}>{resource.fields.filter(f => resource.mode !== 'update' || f.key === 'weight').map(f => <div className="field" key={f.key}>
       <label htmlFor={f.key}>{f.label}{f.required ? ' *' : ' (optional)'}</label>

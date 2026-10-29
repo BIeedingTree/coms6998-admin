@@ -1,40 +1,46 @@
 # Week 7 implementation and handoff — 2026-10-29
 
-All requested sections are implemented in `coms6998-admin`. The Supabase migration
-has **not** been applied, and authenticated live CRUD has **not** been tested.
-No files in `coms6998e`, existing database rows, existing foreign keys, existing RLS
-policies, authentication rules, or Vercel protection settings were changed.
+All requested sections are implemented in `coms6998-admin`. The owner reports that
+Supabase successfully executed the revised `202610290001_week7_admin.sql` with
+“Success. No rows returned.” **Treat the migration as installed; do not rerun it.**
+The agent has not independently queried the live catalog or exercised authenticated
+live CRUD. No schema or policy change is needed for this verification update.
 
-## Required setup
+## Installed-schema review
 
-1. In the existing shared Supabase project's SQL Editor, review and execute the
-   complete file **`supabase/migrations/202610290001_week7_admin.sql`** as the project
-   owner. It is transactional and rerunnable for the schema it defines. It creates
-   ten tables and their constraints/indexes, enables RLS, denies browser roles
-   all access, grants CRUD to `service_role`, and creates an invoker-security trigger
-   to initialize a mix row when a chain is inserted. No default/demo records are
-   inserted. No storage bucket or existing storage policy is created or changed.
-2. The same migration replaces the existing `admin_delete_media` RPC definition,
-   preserving its authenticated superadmin check and atomic vote/media deletion.
-   It recognizes only the new example/media `ON DELETE SET NULL` FK in addition to
-   the existing vote FK. Deleting media still deletes its associated ratings, clears
-   linked examples' optional `media_id`, and retains their independent input/output.
-   All changes roll back together on failure. Unknown dependencies remain blocked.
-   **Do not reinstall the old Week 6 `supabase/admin-delete-media.sql` afterward**:
-   its stricter catalog allowlist does not recognize the new example FK. The revised
-   migration refuses an already-applied earlier draft instead of silently changing
-   its constraints or dropping log tables. It is intended for the unapplied draft.
-3. Ensure `SUPABASE_SERVICE_ROLE_KEY` is configured in `.env.local` and in the
-   appropriate Vercel environment, alongside the existing public Supabase URL/key
-   and server-only Gemini key. The local service-role key was unavailable during
-   implementation. Never put it in a `NEXT_PUBLIC_` variable or commit it. Vercel's
-   existing environment has not been inspected; do not replace working values.
-4. Use the existing Google sign-in with a profile already marked superadmin. This
-   implementation never grants anyone that role. Verify the current OAuth redirect
-   URLs if deploying to a new hostname. No new callback configuration is needed
-   when using the existing hostname.
-5. Run the live checklist below. Create only disposable verification records; no
-   historical generation activity is seeded or fabricated.
+- All eleven resource pages are mapped to the ten new configuration/content tables
+  or the existing `captions` table. The image loader uses `admin_images` and the
+  existing `avatars` bucket. Users/ratings/dashboard keep their original sources.
+- A schema-contract test executes every resource's actual SELECT projection against
+  the migration in isolated PostgreSQL, checks search/form columns and reference
+  FKs, and checks the image projection. No code/schema mismatch was found.
+- The installed RPC signature matches the session-based `admin_delete_media` call.
+  It deletes selected media and ratings atomically, clears optional example links,
+  preserves example input/output, and rejects non-admins/unknown dependencies.
+  Failure and rollback tests pass in isolated PostgreSQL.
+- Fixed a client refresh loop: the resource edit form previously depended on the
+  server row object's identity, which changes on refresh. Successful edits now
+  refresh once per action result; creation navigates directly to the saved record.
+- Google OAuth, server-side identity/role verification, Gemini generation, and all
+  database/RLS definitions are unchanged by this verification update. Project 1 is
+  untouched and its working tree remains clean.
+
+## Remaining access and manual verification
+
+The local environment has no `SUPABASE_SERVICE_ROLE_KEY`. No Supabase connector or
+authenticated admin session is available in the connected browser. Therefore no
+live CRUD, storage upload, or authenticated account test was performed. This does
+not imply that the deployed Vercel environment lacks its server credential.
+
+To complete live acceptance, use the deployed admin app with an existing superadmin
+account and follow the checklist below. For local testing, configure the server-only
+credential privately in `.env.local`; never paste secrets into chat or commit them.
+Verify Vercel's credential only if the deployed app reports a configuration error.
+No new OAuth redirect configuration is needed for the existing hostname.
+
+The migration file remains unchanged in this update. Do not reinstall the old Week 6
+`supabase/admin-delete-media.sql`: its catalog allowlist rejects the installed
+example/media foreign key. No default/demo records or historical logs were created.
 
 ## Schema and behavior
 
@@ -84,7 +90,7 @@ persisted. Project 1 and the admin Gemini generation actions are unchanged.
 
 **No read-only page waits for a future logging pipeline anymore.** The redundant
 `generation_requests` and `llm_responses` CREATE statements have been removed from
-the unapplied migration, not replaced with backfill, copies, views, or fake records.
+the migration before the owner installed it, not replaced with backfill, copies, views, or fake records.
 Requests/Responses can use existing data even before the Week 7 migration is run
 (assuming the existing admin server credential is configured). If there are no
 stored prompts/outputs, their honest empty states appear. New successful media
@@ -129,7 +135,8 @@ The existing public bucket means uploads are public; this is stated in the UI.
 ## Rubric status
 
 PASS below means implemented and locally validated. Live authenticated checks are
-PENDING for every data feature until migration and server access are available.
+PENDING for every data feature until an authenticated live test can be performed.
+The schema installation itself is owner-confirmed.
 
 | Requirement | Implementation | Live verification |
 | --- | --- | --- |
@@ -150,13 +157,13 @@ PENDING for every data feature until migration and server access are available.
 | Grouped blue/white navigation, responsive layout, accessible forms | PASS | Authenticated browser interactions PENDING |
 | Confirmation/loading/empty/error/success states | PASS | PENDING |
 | Server-side authorization and restrictive new-table RLS | PASS, mock + isolated SQL tests | Live account checks PENDING |
-| Original app/schema/data/policy preservation | PASS, code audit + isolated migration comparison | No live migration executed |
-| Migration execution | Complete SQL delivered | PENDING, manual execution |
+| Original app/schema/data/policy preservation | PASS, code audit + isolated migration comparison | No agent changes to live schema/data/policies |
+| Migration execution | PASS, owner reported success | Owner-confirmed; not independently queried |
 | Git push and deployment | See final chat report for commit/push | Deployment unverified unless stated there |
 
 ## Validation performed
 
-- `npm test`: **176 passing**, zero failures. Existing tests plus server-action
+- `npm test`: **179 passing**, zero failures. Existing tests plus server-action
   round trips for all six CRUD entities, all read-only loaders, mix validation,
   forged writes, revoked/missing authorization, search/pagination, FK errors, image
   upload/update/delete and failure cleanup. These application tests mock Supabase,
@@ -177,12 +184,14 @@ PENDING for every data feature until migration and server access are available.
 - Prior implementation React form components were statically rendered with isolated fixtures in
   `/tmp` for visual inspection at desktop and 390px widths. This was not a signed-in
   production browser test. No fixture routes or auth bypasses ship with the app.
-- No live Supabase inserts, updates, deletes, file uploads, or migration execution.
+- No live Supabase inserts, updates, deletes, file uploads, or migration execution
+  by the agent. The owner independently completed the migration.
 - No Vercel deployment/protection settings were changed.
 
 ## Live acceptance checklist
 
-1. Apply the migration and configure the server credential. Confirm no setup errors.
+1. With the migration already installed, sign in as an existing superadmin and
+   confirm the deployed app loads. Check its server credential only if needed.
 2. Create a disposable provider, then a model referencing it. Refresh both lists and
    detail pages; edit each; verify duplicate provider/model-key errors. Attempt to
    delete the referenced provider and confirm the dependent-model error.
