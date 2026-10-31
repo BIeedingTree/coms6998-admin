@@ -246,3 +246,9 @@ dialog.delete-dialog::backdrop { background: #142c4e70; }
 
 .mobile-nav { display: none; }
 @media (max-width: 760px) { .sidebar nav { display: none; } .mobile-nav { display: block; margin-top: 18px; } }
+
+.advanced-nav { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.advanced-nav summary { padding: 8px 10px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.advanced-nav .nav-item { padding: 7px 10px; font-size: 13px; }
+.profile-avatar { position: relative; overflow: hidden; }
+.profile-avatar img { position: absolute; inset: 0; object-fit: cover; }

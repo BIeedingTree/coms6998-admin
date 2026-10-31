@@ -5,7 +5,7 @@ export function PageHeader({ eyebrow, title, description, action }: { eyebrow?: 
   return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1><p className="muted">{description}</p></div>{action}</header>;
 }
 export function Empty({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="empty"><h3>{title}</h3><p>{children}</p></div>;
+  return <div className="empty"><h3>{title}</h3>{children && <p>{children}</p>}</div>;
 }
 export function Search({ q, placeholder }: { q: string; placeholder: string }) {
   return <form className="search" role="search"><label className="sr-only" htmlFor="search">{placeholder}</label><span aria-hidden="true">⌕</span><input id="search" name="q" defaultValue={q} placeholder={placeholder} maxLength={100}/><button className="button secondary" type="submit">Search</button>{q && <Link className="text-link" href="?">Clear</Link>}</form>;

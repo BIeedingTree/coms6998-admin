@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getDashboard } from "@/lib/data";
-import { Empty, PageHeader, Stat } from "@/components/ui";
+import { PageHeader, Stat } from "@/components/ui";
 
 export default async function Dashboard() {
   const data = await getDashboard();
@@ -15,19 +15,17 @@ export default async function Dashboard() {
         <Stat label="Total ratings" value={data.ratings.toLocaleString()} detail="Across all media" icon="ratings" />
         <Stat label="Positive ratings" value={percentage === null ? "—" : `${percentage}%`} detail={rated ? `${data.positive.toLocaleString()} of ${rated.toLocaleString()} ratings` : "No ratings yet"} icon="ratings" />
       </div>
-      <section className="panel rating-summary">
+      {rated > 0 && <section className="panel rating-summary">
         <div className="panel-heading"><h2>Upvotes and downvotes</h2><Link href="/admin/ratings" className="text-link">View ratings</Link></div>
         <div className="rating-chart">
           <div className="rating-labels"><span>Upvotes: <strong>{data.positive.toLocaleString()}</strong></span><span>Downvotes: <strong>{data.negative.toLocaleString()}</strong></span></div>
           <div className="rating-bar" role="img" aria-label={rated ? `${data.positive} upvotes, ${data.negative} downvotes; ${percentage}% positive` : "No ratings yet"}>
             {rated > 0 && <><span style={{ width: `${data.positive / rated * 100}%` }} /><span style={{ width: `${data.negative / rated * 100}%` }} /></>}
           </div>
-          <p className="data-note">{rated ? "Upvotes are shown in blue; downvotes in gray." : "The rating breakdown will appear when users leave feedback."}</p>
         </div>
-      </section>
-      <section className="panel">
-        <div className="panel-heading"><div><h2>Most-rated media</h2><p>Ranked by total ratings, then upvotes.</p></div><Link href="/admin/media" className="text-link">View media</Link></div>
-        {!data.top.length ? <Empty title="No rated content yet">Media items will appear here once they receive ratings.</Empty> : (
+      </section>}
+      {data.top.length > 0 && <section className="panel">
+        <div className="panel-heading"><h2>Most-rated media</h2><Link href="/admin/media" className="text-link">View media</Link></div>
           <div className="table-scroll"><table>
             <thead><tr><th>Media item</th><th>Category</th><th>Ratings</th><th>Positive</th><th><span className="sr-only">Action</span></th></tr></thead>
             <tbody>{data.top.map(item => <tr key={item.id}>
@@ -38,9 +36,7 @@ export default async function Dashboard() {
               <td><Link href={`/admin/media/${item.id}`} className="text-link">Review</Link></td>
             </tr>)}</tbody>
           </table></div>
-        )}
-      </section>
-      <p className="data-note">All-time totals. Refresh the page to see new activity.</p>
+      </section>}
     </>
   );
 }
