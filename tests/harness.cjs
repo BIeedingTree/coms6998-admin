@@ -35,6 +35,7 @@ function setup(options = {}) {
     const query = {
       select(fields, config = {}) { projection = fields; head = config.head; return query; },
       not(key, op, value) { if (op !== 'is' || value !== null) throw Error('Unexpected not filter'); request.filters.push(row => row[key] != null); return query; },
+      not(key, operator, value) { if (operator !== 'is') throw Error('Unsupported test filter'); request.filters.push(row => value === null ? row[key] != null : row[key] !== value); return query; },
       neq(key, value) { request.filters.push(row => row[key] != null && String(row[key]) !== String(value)); return query; },
       eq(key, value) { request.filters.push(row => String(row[key]) === String(value)); return query; },
       gt(key, value) { request.filters.push(row => (/^[0-9]+$/.test(String(value)) ? BigInt(row[key]) > BigInt(value) : String(row[key]) > String(value))); return query; },

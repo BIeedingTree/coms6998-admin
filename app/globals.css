@@ -252,3 +252,9 @@ dialog.delete-dialog::backdrop { background: #142c4e70; }
 .advanced-nav .nav-item { padding: 7px 10px; font-size: 13px; }
 .profile-avatar { position: relative; overflow: hidden; }
 .profile-avatar img { position: absolute; inset: 0; object-fit: cover; }
+
+.avatar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px; padding: 20px; }
+.avatar-card { display: grid; justify-items: start; align-content: start; gap: 8px; min-width: 0; }
+.avatar-card a { display: grid; gap: 8px; color: var(--ink); text-decoration: none; }
+.avatar-card img { width: 100%; aspect-ratio: 1; height: auto; object-fit: cover; border-radius: 8px; background: #e8f0fb; }
+.avatar-card .mono { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

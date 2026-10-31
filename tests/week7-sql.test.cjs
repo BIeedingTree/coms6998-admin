@@ -28,6 +28,15 @@ test('Week 7 migration: real SQL in isolated PostgreSQL, never live Supabase', a
   await pg.exec(sql); await pg.exec(sql);
   assert.deepEqual(await oldSchema(), schema); assert.deepEqual(await oldRows(), rows);
   assert.equal((await pg.query("select count(*)::int n from pg_policies where policyname='existing_profile_policy'")).rows[0].n, 1);
+  await t.test('reviewable configuration seed is accurate and idempotent', async () => {
+    const seed = fs.readFileSync(require('node:path').join(__dirname, '../supabase/seeds/20261031_say_it_better_configuration.sql'), 'utf8');
+    await pg.exec(seed); await pg.exec(seed);
+    for (const [table, expected] of Object.entries({ llm_providers: 1, llm_models: 1, prompt_chains: 1, prompt_chain_steps: 1, prompt_chain_mix: 1, terms: 4, allowed_signup_domains: 2, ai_generation_examples: 0, whitelisted_emails: 0 })) {
+      assert.equal((await pg.query(`select count(*)::int n from public.${table}`)).rows[0].n, expected, table);
+    }
+    assert.equal((await pg.query('select model_key from public.llm_models')).rows[0].model_key, 'gemini-3.5-flash-lite');
+    assert.equal((await pg.query('select weight::text from public.prompt_chain_mix')).rows[0].weight, '1.0000');
+  });
   const tables = ['llm_providers','llm_models','prompt_chains','prompt_chain_steps','prompt_chain_mix','terms','ai_generation_examples','allowed_signup_domains','whitelisted_emails','admin_images'];
   await t.test('every new table denies browser roles and permits service-role CRUD', async () => {
     for (const table of tables) {

@@ -18,7 +18,7 @@ const groups: { title: string; links: NavLink[] }[] = [
   ] },
 ];
 const advanced: NavLink[] = [
-  { href: "/admin/images", label: "Images", icon: "media" },
+  { href: "/admin/images", label: "Avatar Images", icon: "media" },
   { href: "/admin/generation-examples", label: "Generation Examples", icon: "media" },
   { href: "/admin/terms", label: "Terms", icon: "media" },
   { href: "/admin/prompt-chains", label: "Prompt Chains", icon: "sparkles" },

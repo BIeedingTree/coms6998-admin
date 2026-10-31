@@ -26,6 +26,21 @@ export async function getUsers(params: SearchParams) {
   return { rows: (data ?? []) as Profile[], count: count ?? 0, ...options };
 }
 
+export async function getAvatarProfiles(params: SearchParams) {
+  const { db } = await requireAdmin();
+  const options = searchOptions(params);
+  let query = db.from("profiles").select(PROFILE_FIELDS, { count: "exact" })
+    .not("avatar_url", "is", null).neq("avatar_url", "").order("id");
+  if (options.q) {
+    query = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(options.q)
+      ? query.eq("id", options.q)
+      : query.or(`first_name.ilike.%${options.q}%,last_name.ilike.%${options.q}%`);
+  }
+  const { data, error, count } = await query.range(options.from, options.to);
+  fail(error);
+  return { rows: (data ?? []) as Profile[], count: count ?? 0, ...options };
+}
+
 export async function getMedia(params: SearchParams) {
   const { db } = await requireAdmin();
   const options = searchOptions(params);
